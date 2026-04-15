@@ -14,10 +14,12 @@ export class NetworkError extends Error {
 
 export class ApiError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  readonly code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -26,6 +28,20 @@ export class ParseError extends Error {
     super(message);
     this.name = 'ParseError';
   }
+}
+
+interface BackendErrorEnvelope {
+  code?: string;
+  message?: string;
+}
+
+function isBackendErrorEnvelope(value: unknown): value is BackendErrorEnvelope {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    (typeof v.code === 'string' || v.code === undefined) &&
+    (typeof v.message === 'string' || v.message === undefined)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -56,9 +72,23 @@ export async function fetchMetarByBbox(
   }
 
   if (!response.ok) {
+    let backendMessage: string | undefined;
+    let backendCode: string | undefined;
+
+    try {
+      const errorBody: unknown = await response.json();
+      if (isBackendErrorEnvelope(errorBody)) {
+        backendMessage = errorBody.message;
+        backendCode = errorBody.code;
+      }
+    } catch {
+      // Keep fallback error message if body is not JSON.
+    }
+
     throw new ApiError(
-      `Weather service returned ${response.status}`,
-      response.status
+      backendMessage ?? `Weather service returned ${response.status}`,
+      response.status,
+      backendCode
     );
   }
 

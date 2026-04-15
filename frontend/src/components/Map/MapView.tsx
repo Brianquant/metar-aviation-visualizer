@@ -9,9 +9,32 @@ import { MetarPanel } from '../MetarPanel/MetarPanel';
 import { useMapBounds } from '../../hooks/useMapBounds';
 import { useMetar } from '../../hooks/useMetar';
 import type { MetarData } from '../../types/metar';
+import { ApiError, NetworkError, ParseError } from '../../api/metar';
 
 const DEFAULT_CENTER: [number, number] = [51, 10];
 const DEFAULT_ZOOM = 6;
+
+function getMapErrorMessage(error: Error): string {
+  if (error instanceof ApiError) {
+    if (error.code === 'invalid_bbox') {
+      return 'Invalid map viewport request';
+    }
+    if (error.status >= 500) {
+      return `Weather service unavailable (${error.status})`;
+    }
+    return error.message;
+  }
+
+  if (error instanceof NetworkError) {
+    return 'Network issue while loading weather data';
+  }
+
+  if (error instanceof ParseError) {
+    return 'Received unexpected weather data format';
+  }
+
+  return 'Failed to load weather data';
+}
 
 // Inner component rendered inside MapContainer so hooks can access the map context
 function MapInner() {
@@ -52,7 +75,7 @@ function MapInner() {
 
       {error && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-red-900/80 text-white text-sm px-3 py-1 rounded-full">
-          Failed to load weather data
+          {getMapErrorMessage(error)}
         </div>
       )}
 

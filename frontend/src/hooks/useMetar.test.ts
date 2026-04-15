@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useMetar } from './useMetar';
 import type { BoundingBox } from '../types/metar';
+import { ApiError } from '../api/metar';
 
 const BOUNDS: BoundingBox = { north: 55, south: 47, east: 16, west: 5 };
 
@@ -93,6 +94,33 @@ describe('useMetar', () => {
     });
 
     expect(result.current.isLoading).toBe(false);
+  });
+
+  it('uses backend error envelope for api errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 'upstream_timeout',
+          message: 'Upstream weather service timed out',
+        }),
+        {
+          status: 504,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
+
+    const { result } = renderHook(() => useMetar(BOUNDS));
+    await vi.advanceTimersByTimeAsync(350);
+
+    await waitFor(() => {
+      expect(result.current.error).toBeInstanceOf(ApiError);
+    });
+
+    const err = result.current.error as ApiError;
+    expect(err.status).toBe(504);
+    expect(err.code).toBe('upstream_timeout');
+    expect(err.message).toBe('Upstream weather service timed out');
   });
 
   it('does not fetch when bounds is null', async () => {
