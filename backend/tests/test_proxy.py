@@ -160,3 +160,38 @@ def test_metar_rejects_missing_bbox():
 
     assert response.status_code == 400
     assert response.json()["code"] == "invalid_bbox"
+
+
+def test_metar_uses_stale_cache_on_timeout():
+    """If upstream times out and stale cache exists, return stale data."""
+    initial_client, _ = _make_mock_client(200, json_data=[{"icaoId": "EDDB"}])
+    timeout_client, timeout_get = _make_mock_client(200)
+    timeout_get.side_effect = httpx.TimeoutException("timed out")
+
+    with patch("main.httpx.AsyncClient", return_value=initial_client):
+        client.get("/api/metar?bbox=47,5,55,16&format=json")
+
+    with patch("main.CACHE_TTL_SECONDS", 0):
+        with patch("main.httpx.AsyncClient", return_value=timeout_client):
+            response = client.get("/api/metar?bbox=47,5,55,16&format=json")
+
+    assert response.status_code == 200
+    assert response.json() == [{"icaoId": "EDDB"}]
+    assert response.headers.get("x-metar-data-stale") == "true"
+
+
+def test_metar_uses_stale_cache_on_upstream_error():
+    """If upstream fails and stale cache exists, return stale data."""
+    initial_client, _ = _make_mock_client(200, json_data=[{"icaoId": "EDDB"}])
+    error_client, _ = _make_mock_client(503, json_data={"error": "unavailable"})
+
+    with patch("main.httpx.AsyncClient", return_value=initial_client):
+        client.get("/api/metar?bbox=47,5,55,16&format=json")
+
+    with patch("main.CACHE_TTL_SECONDS", 0):
+        with patch("main.httpx.AsyncClient", return_value=error_client):
+            response = client.get("/api/metar?bbox=47,5,55,16&format=json")
+
+    assert response.status_code == 200
+    assert response.json() == [{"icaoId": "EDDB"}]
+    assert response.headers.get("x-metar-data-stale") == "true"
