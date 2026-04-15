@@ -42,14 +42,17 @@ def test_health_returns_ok():
 
 
 def test_metar_adds_cors_header():
-    """Proxy must add Access-Control-Allow-Origin: * to all responses."""
+    """Proxy must reflect an allowlisted origin."""
     mock_client, _ = _make_mock_client(200, json_data=[{"icaoId": "EDDB"}])
 
     with patch("main.httpx.AsyncClient", return_value=mock_client):
-        response = client.get("/api/metar?bbox=47,5,55,16&format=json")
+        response = client.get(
+            "/api/metar?bbox=47,5,55,16&format=json",
+            headers={"Origin": "http://localhost:5173"},
+        )
 
     assert response.status_code == 200
-    assert response.headers.get("access-control-allow-origin") == "*"
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
 
 
 def test_metar_forwards_query_params():
@@ -81,10 +84,17 @@ def test_metar_propagates_upstream_error():
     mock_client, _ = _make_mock_client(503, json_data={"error": "unavailable"})
 
     with patch("main.httpx.AsyncClient", return_value=mock_client):
-        response = client.get("/api/metar?bbox=47,5,55,16&format=json")
+        response = client.get(
+            "/api/metar?bbox=47,5,55,16&format=json",
+            headers={"Origin": "http://localhost:5173"},
+        )
 
     assert response.status_code == 503
-    assert response.headers.get("access-control-allow-origin") == "*"
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert response.json() == {
+        "code": "upstream_error",
+        "message": "Upstream weather service error",
+    }
 
 
 def test_metar_handles_timeout():
@@ -93,10 +103,17 @@ def test_metar_handles_timeout():
     mock_get.side_effect = httpx.TimeoutException("timed out")
 
     with patch("main.httpx.AsyncClient", return_value=mock_client):
-        response = client.get("/api/metar?bbox=47,5,55,16&format=json")
+        response = client.get(
+            "/api/metar?bbox=47,5,55,16&format=json",
+            headers={"Origin": "http://localhost:5173"},
+        )
 
     assert response.status_code == 504
-    assert response.headers.get("access-control-allow-origin") == "*"
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert response.json() == {
+        "code": "upstream_timeout",
+        "message": "Upstream weather service timed out",
+    }
 
 
 def test_metar_returns_empty_array_on_204():
@@ -104,11 +121,14 @@ def test_metar_returns_empty_array_on_204():
     mock_client, _ = _make_mock_client(204)
 
     with patch("main.httpx.AsyncClient", return_value=mock_client):
-        response = client.get("/api/metar?bbox=47,5,55,16&format=json")
+        response = client.get(
+            "/api/metar?bbox=47,5,55,16&format=json",
+            headers={"Origin": "http://localhost:5173"},
+        )
 
     assert response.status_code == 200
     assert response.json() == []
-    assert response.headers.get("access-control-allow-origin") == "*"
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
 
 
 def test_metar_uses_cache_on_second_request():
@@ -120,3 +140,23 @@ def test_metar_uses_cache_on_second_request():
         client.get("/api/metar?bbox=47,5,55,16&format=json")
 
     assert mock_get.call_count == 1
+
+
+def test_metar_rejects_invalid_bbox():
+    response = client.get("/api/metar?bbox=91,5,55,16&format=json")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "invalid_bbox",
+        "message": (
+            "bbox must contain south,west,north,east with valid latitude/"
+            "longitude ranges"
+        ),
+    }
+
+
+def test_metar_rejects_missing_bbox():
+    response = client.get("/api/metar?format=json")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_bbox"
