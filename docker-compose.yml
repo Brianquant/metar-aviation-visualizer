@@ -1,0 +1,8 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8000"
+    environment:
+      - UPSTREAM_BASE_URL=https://aviationweather.gov/api/data
+      - CACHE_TTL_SECONDS=60
